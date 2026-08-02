@@ -311,3 +311,21 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## opencode / z-ai glm-5.2 (via openrouter)
 - 2026-07-09 (aicred-invoice-downloads, 4 code-fix tasks + 1 follow-up, worktrees+npm ci checks): systematic attempt-1 NO-OP — all 4 parallel workers produced zero edits and no summary on first attempt, then completed cleanly on attempt 2 after retry-prompt injection (34k-69k tokens each). Follow-up single task passed attempt 1. Suspect first-invocation session warm-up in opencode-sandboxed under parallel spawn; budget for 2 attempts on parallel GLM batches. Output quality on Next.js/Stripe route+test work: solid, spec-faithful, one boss-caught design gap (used user-scoped supabase client where RLS demanded service role — spec didn't say explicitly; say it explicitly).
+
+## claude-sonnet-5 (claude engine)
+
+- 2026-07-11 — code-feature (ocl-calendar-audio-assist r1: 13-file Rails port of a
+  voice-to-text pattern, controller generalization + Stimulus + specs): PASS attempt 1,
+  30 examples green, honest notes incl. a pre-existing failure it correctly didn't chase.
+- 2026-07-11 — code-fix (same job r2: 4 review fixes incl. route-param dispatch +
+  AbortSignal timeouts): PASS attempt 1, 37 green. Flagged its own verification gap
+  (no JS harness for the Stimulus fixes). Engine picked per Mihai's Max200 sub — see
+  SKILL.md "cost evidence is subscription-relative" (codex was wrongly recommended first).
+
+- 2026-07-24 (crash-respin, OCL): sonnet 2/2 first-try on code-fix + code-feature in worktrees over a Rails app — including an honest hypothesis-refutation (reverted suspect commits to prove a bug pre-existing) and a pre-existing-failure swap-test. Orchestrator found one nil-fallthrough edge the specs missed; worth an explicit "signals with no value fall out of comparisons" line in future precedence specs.
+
+## claude/sonnet
+- 2026-08-01 poetry-tag-suggestions (research, 14 tasks of 29 poems each): 13/14 first-try, one retry (batch-13) on validator id-coverage; retry passed. Also 2/2 first-try on code-feature (Rails view+stimulus+specs, ~14-24k tokens/task).
+
+## claude/haiku
+- 2026-08-01 poetry-tag-suggestions (research, 1-task audition, 25 poems): first-try pass on schema-validated literary tagging. Candidate for bigger lanes in batch classification/tagging work.
