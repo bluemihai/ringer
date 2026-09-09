@@ -51,7 +51,6 @@ CONFIG_DIR_NAME = TOOL_NAME
 CONFIG_FILE_NAME = "config.toml"
 DEFAULT_ENGINE_NAME = "codex"
 DEFAULT_TIMEOUT_S = 900
-CHECK_TIMEOUT_S = 60
 DEFAULT_DASHBOARD_PORT_BASE = 8787
 DEFAULT_HUD_PORT = 8700
 DEFAULT_CATALOG_SOURCE = "https://openrouter.ai/api/v1/models"
@@ -7290,7 +7289,7 @@ def run_models_command(config: AppConfig, args: argparse.Namespace) -> int:
 
 class Verifier:
     async def verify(self, task: TaskSpec, taskdir: Path) -> VerifyResult:
-        check_returncode, check_timed_out, output = await self._run_check(task.check, taskdir)
+        check_returncode, check_timed_out, output = await self._run_check(task.check, taskdir, task.timeout_s)
         missing_files = tuple(
             rel for rel in task.expect_files if not self._is_nonempty_file(self._expect_file_path(taskdir, rel))
         )
@@ -7328,7 +7327,7 @@ class Verifier:
         return candidate if candidate.is_absolute() else taskdir / candidate
 
     @staticmethod
-    async def _run_check(command: str, cwd: Path) -> tuple[int | None, bool, str]:
+    async def _run_check(command: str, cwd: Path, timeout_s: int) -> tuple[int | None, bool, str]:
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=str(cwd),
@@ -7339,7 +7338,7 @@ class Verifier:
         )
         timed_out = False
         try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=CHECK_TIMEOUT_S)
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
         except asyncio.TimeoutError:
             timed_out = True
             terminate_process_group(proc)
@@ -7350,7 +7349,7 @@ class Verifier:
                 stdout, _ = await proc.communicate()
         output = stdout.decode("utf-8", errors="replace") if stdout else ""
         if timed_out:
-            output += f"\n[ringer.py] check timed out after {CHECK_TIMEOUT_S}s\n"
+            output += f"\n[ringer.py] check timed out after {timeout_s}s\n"
         return proc.returncode, timed_out, output
 
 
@@ -9028,7 +9027,94 @@ def build_parser() -> argparse.ArgumentParser:
 
     uninstall_parser = subparsers.add_parser("uninstall-agent", help="remove the ringer Claude Code skill and hooks")
     uninstall_parser.add_argument("--project", action="store_true", help="remove from ./.claude instead of ~/.claude")
+
+    stop_parser = subparsers.add_parser(
+        "stop",
+        help="stop a running manifest and REAP its workers (never pkill the orchestrator)",
+    )
+    stop_parser.add_argument(
+        "target",
+        nargs="?",
+        help="a task-key, run_name, or path under the workdir. Omit with --all.",
+    )
+    stop_parser.add_argument("--workdir", default=".", help="the manifest's workdir (default: cwd)")
+    stop_parser.add_argument("--all", action="store_true", help="stop every ringer worker under --workdir")
+    stop_parser.add_argument("--dry-run", action="store_true", help="list what would be killed, kill nothing")
     return parser
+
+
+def find_worker_processes(workdir: Path, target: str | None) -> list[tuple[int, str]]:
+    """Every PID whose CWD is inside a ringer task dir under `workdir`.
+
+    The task directory is a worker's ONLY reliable fingerprint: its argv
+    contains no manifest path and no run name, so matching on those (the
+    `pkill -f <manifest>` reflex) hits the orchestrator and leaves the worker
+    running. Workers are spawned with start_new_session=True, so each sits in
+    its own process group and survives its parent's death — an orphan then
+    keeps writing into the repo. Match on cwd, kill the group.
+    """
+    workdir = workdir.resolve()
+    found: list[tuple[int, str]] = []
+    try:
+        out = subprocess.run(
+            ["lsof", "-a", "-d", "cwd", "-Fpn", "+D", str(workdir)],
+            capture_output=True, text=True, timeout=30,
+        ).stdout
+    except Exception:
+        return found
+
+    pid = None
+    for line in out.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and pid is not None:
+            cwd = line[1:]
+            if cwd == str(workdir):
+                continue  # the orchestrator / your shell, not a worker
+            if target and target not in cwd:
+                continue
+            if pid != os.getpid():
+                found.append((pid, cwd))
+            pid = None
+    return found
+
+
+def stop_run(workdir: str, target: str | None, stop_all: bool, dry_run: bool) -> int:
+    if not target and not stop_all:
+        print("stop: name a target (task-key / run_name) or pass --all", file=sys.stderr)
+        return 2
+
+    procs = find_worker_processes(Path(workdir), None if stop_all else target)
+    if not procs:
+        print("stop: no ringer workers found — nothing is writing.")
+        return 0
+
+    for pid, cwd in procs:
+        label = f"  pid {pid}  {cwd}"
+        if dry_run:
+            print(f"would kill{label}")
+            continue
+        print(f"killing{label}")
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            with contextlib.suppress(Exception):
+                os.killpg(os.getpgid(pid), sig)
+            time.sleep(0.5)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+
+    if dry_run:
+        return 0
+
+    time.sleep(1)
+    still = [p for p, _ in find_worker_processes(Path(workdir), None if stop_all else target)]
+    if still:
+        print(f"stop: STILL ALIVE {still} — do not touch the tree yet", file=sys.stderr)
+        return 1
+    print("stop: all workers dead. Re-read `git status` NOW — a killed worker may have")
+    print("      written after you last looked.")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -9042,6 +9128,9 @@ def main(argv: list[str] | None = None) -> int:
             return install_agent(project=args.project)
         if args.command == "uninstall-agent":
             return uninstall_agent(project=args.project)
+
+        if args.command == "stop":
+            return stop_run(args.workdir, args.target, args.all, args.dry_run)
 
         if args.command == "lint":
             manifest = Manifest.from_path(args.manifest)
