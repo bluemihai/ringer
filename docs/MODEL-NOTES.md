@@ -329,3 +329,10 @@ checks and raw logs support — no vibes, no worker self-reports.
 
 ## claude/haiku
 - 2026-08-01 poetry-tag-suggestions (research, 1-task audition, 25 poems): first-try pass on schema-validated literary tagging. Candidate for bigger lanes in batch classification/tagging work.
+
+## 2026-08-03 — poetry-perf-2058 (code-fix, OCL Rails)
+- **sonnet**: 2 tasks. rating-cell (view refactor w/ contract preservation): pass on attempt 2 — attempt-1 check failure was partly orchestrator's over-broad spec list. photo-variants: marked fail after 2 attempts but the DIFF was correct — every failing spec reproduced on clean main (stale specs + broken local vips). Lesson is check-design, not model: baseline existing-spec checks against main before blaming the worker.
+- **haiku**: 1 task (one-line config + booted-rails verify): pass first try. Right tier for mechanical config edits with executable checks.
+
+## claude / sonnet
+- 2026-08-24 (code-fix, OCL poetry #2150): two attempts, both terminal "Output blocked by content filtering policy" — the spec required byte-copying published poem translations into repo files; the filter refuses to retype published literary translations even when they already live in the target repo/DB. Fix: never make a model worker type such texts — orchestrator ships them in a data file, scripts copy them, worker writes only surrounding code. Checks were fine; the task shape was wrong.
