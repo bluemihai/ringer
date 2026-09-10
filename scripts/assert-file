@@ -97,47 +97,54 @@ def main():
     tag = a.label or path.name
     scope = "verbatim" if a.raw else "comments stripped"
 
+    # EVERY failing assertion is reported, not just the first. Exiting at the
+    # first one hides the rest, and on 2026-09-10 that cost a full round trip:
+    # a check run bare beforehand failed on its intended assertion, so "fails
+    # for the right reason" looked true — while a second assertion in the same
+    # check contradicted the brief and was still waiting to fire.
+    failures = []
+
     for pat in a.contains:
         if not find_all(text, pat, a.regex):
-            print(f"FAIL: {tag}: expected to find {pat!r} ({scope}), and it is absent")
-            return 1
+            failures.append(f"expected to find {pat!r}, and it is absent")
 
     for pat in a.absent:
         hits = find_all(text, pat, a.regex)
         if hits:
-            print(
-                f"FAIL: {tag}: {pat!r} must not appear ({scope}) — "
-                f"found {len(hits)}x, first at line {line_of(text, hits[0])}"
+            failures.append(
+                f"{pat!r} must not appear — found {len(hits)}x, "
+                f"first at line {line_of(text, hits[0])}"
             )
-            return 1
 
     for spec in a.count:
         if "=" not in spec:
-            print(f"FAIL: --count needs PATTERN=N, got {spec!r}")
-            return 1
+            failures.append(f"--count needs PATTERN=N, got {spec!r}")
+            continue
         pat, _, want = spec.rpartition("=")
         hits = find_all(text, pat, a.regex)
         if len(hits) != int(want):
-            print(f"FAIL: {tag}: expected {pat!r} {want}x ({scope}), found {len(hits)}x")
-            return 1
+            failures.append(f"expected {pat!r} {want}x, found {len(hits)}x")
 
     for first, second in a.before:
         fh = find_all(text, first, a.regex)
         sh = find_all(text, second, a.regex)
         if not fh:
-            print(f"FAIL: {tag}: {first!r} not found, so it cannot precede {second!r}")
-            return 1
-        if not sh:
-            print(f"FAIL: {tag}: {second!r} not found, so {first!r} cannot precede it")
-            return 1
-        if fh[0] >= sh[0]:
-            print(
-                f"FAIL: {tag}: {first!r} (line {line_of(text, fh[0])}) must come before "
+            failures.append(f"{first!r} not found, so it cannot precede {second!r}")
+        elif not sh:
+            failures.append(f"{second!r} not found, so {first!r} cannot precede it")
+        elif fh[0] >= sh[0]:
+            failures.append(
+                f"{first!r} (line {line_of(text, fh[0])}) must come before "
                 f"{second!r} (line {line_of(text, sh[0])})"
             )
-            return 1
 
     n = len(a.contains) + len(a.absent) + len(a.count) + len(a.before)
+    if failures:
+        print(f"FAIL: {tag} — {len(failures)} of {n} assertion(s) failed ({scope}):")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+
     print(f"OK: {tag} — {n} assertion(s) held ({scope})")
     return 0
 
