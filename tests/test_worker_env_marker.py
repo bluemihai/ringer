@@ -46,7 +46,7 @@ class WorkerEnvMarkerTests(unittest.TestCase):
                         'bin = "/bin/sh"',
                         "args_template = [",
                         '  "-c",',
-                        '  "printf %s \\"$RINGER_WORKER\\" > marker.txt",',
+                        '  "printf %s \\"$RINGER_WORKER:$ITERM_SESSION_ID:$TERM_SESSION_ID\\" > marker.txt",',
                         '  "sh",',
                         '  "{spec}",',
                         "]",
@@ -74,8 +74,8 @@ class WorkerEnvMarkerTests(unittest.TestCase):
                                     "variable to marker.txt so the check can verify it."
                                 ),
                                 "check": (
-                                    "grep -qx 1 marker.txt || "
-                                    "{ echo FAIL: marker.txt does not hold 1; exit 1; }"
+                                    "grep -qx '1::' marker.txt || "
+                                    "{ echo FAIL: marker.txt is not '1::'; exit 1; }"
                                 ),
                                 "expect_files": ["marker.txt"],
                             },
@@ -89,6 +89,8 @@ class WorkerEnvMarkerTests(unittest.TestCase):
             env = os.environ.copy()
             env.pop("RINGER_WORKER", None)
             env["RINGER_NO_SELF_UPDATE"] = "1"
+            env["ITERM_SESSION_ID"] = "w0t0p0:FAKE-TAB"
+            env["TERM_SESSION_ID"] = "w0t0p0:FAKE-TAB"
             env["HOME"] = str(home)
             env["RINGER_HOME"] = str(ringer_home)
             env["XDG_CONFIG_HOME"] = str(root / "xdg-config")
@@ -118,7 +120,7 @@ class WorkerEnvMarkerTests(unittest.TestCase):
             self.assertEqual(0, proc.returncode, combined_output)
             marker = workdir / "marker-task" / "marker.txt"
             self.assertTrue(marker.is_file(), combined_output)
-            self.assertEqual("1", marker.read_text(encoding="utf-8"))
+            self.assertEqual("1::", marker.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

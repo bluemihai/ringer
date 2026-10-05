@@ -48,6 +48,19 @@ TOOL_NAME = "ringer"
 STATE_DIR_NAME = ".ringer"
 ENV_VAR_PREFIX = "RINGER"
 WORKER_ENV_VAR = f"{ENV_VAR_PREFIX}_WORKER"
+# Terminal session ids name the human's tab; a worker that inherits them can
+# retitle or recolour that tab from its own hooks.
+WORKER_DROPPED_ENV_VARS = ("ITERM_SESSION_ID", "TERM_SESSION_ID")
+
+
+def worker_environ(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for a worker process: marked as a worker (so its hooks can
+    skip session presence) and detached from the launching terminal's tab."""
+    env = dict(os.environ if base is None else base)
+    for name in WORKER_DROPPED_ENV_VARS:
+        env.pop(name, None)
+    env[WORKER_ENV_VAR] = "1"
+    return env
 
 CONFIG_DIR_NAME = TOOL_NAME
 CONFIG_FILE_NAME = "config.toml"
@@ -9223,9 +9236,7 @@ class RingerRunner:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     start_new_session=True,
-                    # Lets the worker's own hooks tell it apart from a human's
-                    # session (e.g. skip presence manifests and tab titles).
-                    env={**os.environ, WORKER_ENV_VAR: "1"},
+                    env=worker_environ(),
                 )
             except Exception as exc:
                 message = f"[ringer.py] worker spawn failed: {exc}\n"
