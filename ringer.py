@@ -47,6 +47,7 @@ from typing import Any, Iterable
 TOOL_NAME = "ringer"
 STATE_DIR_NAME = ".ringer"
 ENV_VAR_PREFIX = "RINGER"
+WORKER_ENV_VAR = f"{ENV_VAR_PREFIX}_WORKER"
 
 CONFIG_DIR_NAME = TOOL_NAME
 CONFIG_FILE_NAME = "config.toml"
@@ -9222,6 +9223,9 @@ class RingerRunner:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     start_new_session=True,
+                    # Lets the worker's own hooks tell it apart from a human's
+                    # session (e.g. skip presence manifests and tab titles).
+                    env={**os.environ, WORKER_ENV_VAR: "1"},
                 )
             except Exception as exc:
                 message = f"[ringer.py] worker spawn failed: {exc}\n"
