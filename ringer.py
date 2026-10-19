@@ -8810,6 +8810,61 @@ class Verifier:
         return proc.returncode, timed_out, output
 
 
+CC_SEND = Path.home() / ".claude" / "bin" / "cc-send"
+
+
+def notify_dispatching_session(
+    runner: "RingerRunner", *, final_state: bool, error: BaseException | None
+) -> None:
+    """One line to the Claude session that dispatched this run, on run end.
+
+    Every run end: all tasks pass/fail, a cancelled run, or an orchestrator
+    failure inside run(). The dispatching session is `--identity` when that
+    names a live session (cc-send resolves the animal name through
+    ~/.claude/sessions/*.json), else the parent Claude session found by
+    walking the process tree. Never raises: the run's own exit code and run
+    JSON stay the source of truth; this is the wake-up (OCL 3543, 2026-10-19,
+    a passed run sat six hours unread).
+    """
+    if os.environ.get("RINGER_NO_SESSION_NOTIFY") == "1":
+        return
+    if not CC_SEND.is_file() or not os.access(CC_SEND, os.X_OK):
+        return
+    try:
+        summary = runner.state_writer.build_summary()
+        passed = int(summary.get("pass", 0))
+        failed = int(summary.get("fail", 0))
+        path = runner.state_writer.path
+        if final_state or error is None or isinstance(error, asyncio.CancelledError):
+            verdict = "TERMINAL"
+        else:
+            verdict = f"TERMINAL (orchestrator error: {type(error).__name__}: {error})"
+        line = (
+            f"ringer {runner.manifest.run_name} {verdict}: pass {passed} fail {failed}, "
+            f"run JSON {path}"
+        )
+        targets = [runner.identity, "parent"] if runner.identity else ["parent"]
+        for target in targets:
+            result = subprocess.run(
+                [str(CC_SEND), "-q", target, line],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+            if result.returncode != 2:  # 2 = no such session; anything else is final
+                break
+        print(
+            f"ringer.py: run-end notice not delivered ({result.stderr.strip()})",
+            file=sys.stderr,
+        )
+    except Exception as exc:  # the notice must never fail the run
+        print(f"ringer.py: run-end notice error (non-fatal): {exc}", file=sys.stderr)
+
+
 class RingerRunner:
     def __init__(
         self,
@@ -8883,6 +8938,9 @@ class RingerRunner:
             if self.dashboard is not None:
                 self.dashboard.stop()
             self.logger.close()
+            notify_dispatching_session(
+                self, final_state=final_state, error=sys.exc_info()[1]
+            )
             print_summary(self.run_id, self.runtimes)
             print("Model log updated; run './ringer.py models' for the per-model scoreboard.")
             # The post-run journey: tell a human exactly where the results live.
